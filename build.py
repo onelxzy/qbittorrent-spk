@@ -277,8 +277,6 @@ def main():
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     lines = [
-        UPSTREAM_MARKER.format(tag=tag),
-        "",
         "上游版本：" + tag,
         "qBittorrent：" + qbt_version,
         "libtorrent：" + lt_version,
@@ -293,6 +291,9 @@ def main():
     for item in assets_out:
         lines.append("| `{0}` | {1} | `{2}` |".format(
             item["file"], "ARM" if item["family"] == "arm" else "x86_64", item["md5"]))
+    # ★ 标记放在正文末尾：套件源流水线会取 Release 正文的前 300 字符作为
+    #   套件中心的 changelog，标记若放开头会作为可见文本出现在套件中心。
+    lines += ["", UPSTREAM_MARKER.format(tag=tag)]
     (DIST / "notes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print("构建完成，产物:")
