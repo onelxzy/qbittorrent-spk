@@ -1,0 +1,106 @@
+name: Build SPK
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: '忽略已发布的上游版本，强制重新构建（构建序号继续递增）'
+        type: boolean
+        default: false
+  push:
+    branches: [ main ]
+    paths:
+      - 'build.py'
+      - 'app.json'
+      - 'spk_builder.py'
+      - 'template/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: write
+
+# 同一分支不允许并发：两个 run 同时读写 Release 会撞同一个版本号，
+# 导致资产互相覆盖、清单 MD5 与实际文件不一致。
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build SPK
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 布尔输入不能与字符串 'true' 比较（群晖以外同理）：
+          # GitHub 表达式会把字符串强转成数字得 NaN，条件恒为假。
+          FORCE_REBUILD: ${{ inputs.force_rebuild && '1' || '' }}
+        run: python build.py
+
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -f dist/manifest.json ]; then
+            echo "本次没有新产物，跳过发布。"
+            exit 0
+          fi
+
+          PKG=$(python -c "import json;print(json.load(open('dist/manifest.json'))['package'])")
+          VER=$(python -c "import json;print(json.load(open('dist/manifest.json'))['version'])")
+          TAG="${PKG}-v${VER}"
+          echo "发布 ${TAG}"
+
+          # Release 正文里带有 <upstream-tag> 标记，build.py 依靠它判断
+          # 某个上游版本是否已打包，从而保证版本号单调递增且不重复打包。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file dist/notes.md
+          else
+            gh release create "$TAG" --title "${PKG} v${VER}" --notes-file dist/notes.md
+          fi
+
+          for f in dist/*.spk; do
+            NAME=$(basename "$f")
+            # 先按资产 id 精确删除同名旧资产，再上传。
+            # gh release upload --clobber 在部分版本下会以
+            # "HTTP 422 ReleaseAsset.name already exists" 失败。
+            OLD=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              --jq ".assets[] | select(.name==\"${NAME}\") | .id" 2>/dev/null || true)
+            if [ -n "${OLD}" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${OLD}"
+              sleep 2
+            fi
+            gh release upload "$TAG" "$f" --clobber
+
+            # 上传后回读校验：线上文件的 MD5 必须与构建清单一致，
+            # 否则 DSM 下载到 100% 后会因校验失败而无法安装。
+            LOCAL_MD5=$(md5sum "$f" | awk '{print $1}')
+            ASSET_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              --jq ".assets[] | select(.name==\"${NAME}\") | .id" 2>/dev/null || true)
+            if [ -z "${ASSET_ID}" ]; then
+              echo "[✗] 上传后找不到资产 ${NAME}"
+              exit 1
+            fi
+            curl -fsSL --retry 3 \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              -o /tmp/verify.spk \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}"
+            GOT_MD5=$(md5sum /tmp/verify.spk | awk '{print $1}')
+            rm -f /tmp/verify.spk
+            if [ "${GOT_MD5}" != "${LOCAL_MD5}" ]; then
+              echo "[✗] ${NAME} 线上 MD5 校验失败: 期望 ${LOCAL_MD5} 实际 ${GOT_MD5}"
+              exit 1
+            fi
+            echo "[√] ${NAME} 发布并通过 MD5 校验"
+          done

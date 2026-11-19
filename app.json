@@ -1,0 +1,30 @@
+{
+  "package_id": "qBittorrent",
+  "display_name": "qBittorrent",
+  "type": "binary",
+  "upstream_repo": "userdocs/qbittorrent-nox-static",
+  "description": "qBittorrent is a lightweight BitTorrent client with a full Web UI. This package bundles the official qBittorrent-nox build (standard edition, not Enhanced) as a native Synology DSM 7 package.",
+  "description_chs": "qBittorrent 是一款轻量级 BitTorrent 客户端，提供完整的 Web 管理界面。本套件封装官方 qBittorrent-nox 标准版（非 Enhanced 增强版），无需 Docker 即可在群晖 DSM 7 上原生运行。",
+  "maintainer": "qBittorrent (userdocs static build)",
+  "maintainer_url": "https://github.com/userdocs/qbittorrent-nox-static",
+  "distributor": "onelxzy",
+  "distributor_url": "https://github.com/onelxzy",
+  "os_min_ver": "7.1-42661",
+  "category": "Download",
+  "changelog": "自动构建，对应上游 {tag}。",
+  "upstream_source": "qbittorrent/qBittorrent",
+  "architectures": [
+    {
+      "family": "x86_64",
+      "syno_arch": "apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow cedarview denverton dockerx64 epyc7002 epyc7003 epyc7003ntb geminilake geminilakenk grantley icelaked kvmx64 purley r1000 r1000nk v1000 v1000nk x86 x86_64",
+      "asset_pattern": "^x86_64-qbittorrent-nox$",
+      "binary_path": "qbittorrent-nox"
+    },
+    {
+      "family": "arm",
+      "syno_arch": "armv8 rtd1296 rtd1619b aarch64 armada37xx v1000",
+      "asset_pattern": "^aarch64-qbittorrent-nox$",
+      "binary_path": "qbittorrent-nox"
+    }
+  ]
+}

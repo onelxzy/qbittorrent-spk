@@ -1,0 +1,70 @@
+### Generic variables and functions
+### -------------------------------
+
+if [ -z "${SYNOPKG_PKGNAME}" ] || [ -z "${SYNOPKG_DSM_VERSION_MAJOR}" ]; then
+  echo "Error: Environment variables are not set." 1>&2;
+  echo "Please run me using synopkg instead. Example: \"synopkg start [packagename]\"" 1>&2;
+  exit 1
+fi
+
+USER="qBittorrent"
+EFF_USER="qBittorrent"
+
+# start-stop-status script redirect stdout/stderr to LOG_FILE
+LOG_FILE="${SYNOPKG_PKGVAR}/${SYNOPKG_PKGNAME}.log"
+
+# Service command has to deliver its pid into PID_FILE
+PID_FILE="${SYNOPKG_PKGVAR}/${SYNOPKG_PKGNAME}.pid"
+
+
+### Package specific variables and functions
+### ----------------------------------------
+
+# 与矿神版保持一致的 profile 布局：
+#   --profile=${SYNOPKG_PKGVAR} --configuration=conf
+#   => 配置落在 ${SYNOPKG_PKGVAR}/qBittorrent_conf/config/qBittorrent.conf
+# 这样从矿神版覆盖升级时，做种列表 / WebUI 设置等用户数据原样沿用。
+QBIT_CONF="${SYNOPKG_PKGVAR}/qBittorrent_conf/config/qBittorrent.conf"
+
+SERVICE_COMMAND="${SYNOPKG_PKGDEST}/bin/qbittorrent-nox --profile=${SYNOPKG_PKGVAR} --configuration=conf --confirm-legal-notice"
+SVC_BACKGROUND=y
+SVC_WRITE_PID=y
+
+# 为新装（含首次覆盖升级到本套件）生成 WebUI 凭据。
+# 口令以 qBittorrent 自身的 PBKDF2-SHA512 格式写回配置，因此不依赖临时密码。
+generate_webui_credentials ()
+{
+    [ -n "${wizard_password}" ] || return 0
+    [ -f "${QBIT_CONF}" ] || return 0
+
+    _cred=$(PYTHON_PASSWORD="${wizard_password}" PYTHON_USERNAME="${wizard_username:-admin}" python3 - <<'PY' 2>/dev/null
+import base64, hashlib, os
+pw = os.environ["PYTHON_PASSWORD"]
+salt = os.urandom(32)
+derived = hashlib.pbkdf2_hmac("sha512", pw.encode("utf-8"), salt, 100000, dklen=64)
+print("@ByteArray(%s:%s)" % (base64.b64encode(salt).decode(),
+                             base64.b64encode(derived).decode()))
+PY
+)
+
+    if [ -z "${_cred}" ]; then
+        echo "WARNING: 无法生成 WebUI 密码哈希（缺少可用的 python3），将保留临时密码。" 1>&2
+        return 0
+    fi
+
+    # 去掉已有同名键，再插到 [Preferences] 段内，避免重复键导致解析异常
+    sed -i '/^WebUI\\Username=/d; /^WebUI\\Password_PBKDF2=/d' "${QBIT_CONF}"
+    if grep -q '^\[Preferences\]' "${QBIT_CONF}"; then
+        sed -i "/^\[Preferences\]/a WebUI\\\\Username=${wizard_username:-admin}\nWebUI\\\\Password_PBKDF2=\"${_cred}\"" "${QBIT_CONF}"
+    else
+        printf '[Preferences]\nWebUI\\Username=%s\nWebUI\\Password_PBKDF2="%s"\n' \
+            "${wizard_username:-admin}" "${_cred}" >> "${QBIT_CONF}"
+    fi
+}
+
+service_postinst ()
+{
+    if [ "${SYNOPKG_PKG_STATUS}" = "INSTALL" ]; then
+        generate_webui_credentials
+    fi
+}

@@ -1,0 +1,13 @@
+{
+    ".url": {
+        "SYNO.SDS.qBittorrent.Application": {
+            "title": "qBittorrent",
+            "desc": "qBittorrent Web UI",
+            "icon": "images/icon_{0}.png",
+            "type": "url",
+            "protocol": "http",
+            "port": "8085",
+            "allUsers": false
+        }
+    }
+}
