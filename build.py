@@ -33,9 +33,6 @@ DIST = ROOT / "dist"
 TEMPLATE = ROOT / "template"
 API = "https://api.github.com"
 
-# Release 正文中的机器可读标记。构建器写入，下次运行据此判断「这个上游 tag 已打包」。
-UPSTREAM_MARKER = "<!-- upstream-tag: {tag} -->"
-
 # 上游 tag 形如 release-5.3.0_v2.1.2（qBittorrent 版本 _ libtorrent 版本）
 TAG_RE = re.compile(r"^release-(?P<qbt>[0-9][0-9A-Za-z.\-]*?)_v(?P<lt>[0-9][0-9A-Za-z.\-]*)$")
 
@@ -131,14 +128,23 @@ def assert_binary_arch(path, family):
 def scan_published(releases):
     """从全部 Release 中读出已构建的成果。
 
-    返回 (已打包的上游 tag 集合, {主版本: 已用最大构建序号})
+    返回 (已打包的「qBittorrent+libtorrent」版本对集合, {主版本: 已用最大构建序号})
+
+    ★ 不用隐藏标记记录上游版本。
+      套件源流水线取 Release 正文前 300 字符作为套件中心的 changelog，
+      隐藏标记若落在该窗口内，changelog 尾部会带出被截断的注释残片。
+      因此改为直接解析正文首行的可见版本信息：
+          上游版本：5.3.0（libtorrent 2.1.2）
+      这行本来就对用户有意义，不占额外空间，也不会被截断影响。
     """
     built_tags = set()
     max_build = {}
     for rel in releases:
         body = rel.get("body") or ""
-        for m in re.finditer(r"<!--\s*upstream-tag:\s*(\S+?)\s*-->", body):
-            built_tags.add(m.group(1))
+        m = re.search(r"上游版本[:：]\s*([0-9][0-9A-Za-z.\-]*)\s*[（(]\s*libtorrent\s*([0-9][0-9A-Za-z.\-]*)",
+                      body)
+        if m:
+            built_tags.add((m.group(1), m.group(2)))
         tag = (rel.get("tag_name") or "").strip()
         if "-v" not in tag:
             continue
@@ -230,8 +236,9 @@ def main():
             print("[!] 读取历史 Release 失败（将视为全新构建）: {0}".format(exc))
 
     force = bool(os.environ.get("FORCE_REBUILD"))
-    if tag in built_tags and not force:
-        print("[=] 上游 {0} 已打包发布，跳过。".format(tag))
+    if (qbt_version, lt_version) in built_tags and not force:
+        print("[=] 上游 qBittorrent {0} / libtorrent {1} 已打包发布，跳过。".format(
+            qbt_version, lt_version))
         return 0
 
     # 主版本一致 -> 构建序号 +1；主版本变化 -> 从 1 开始
@@ -280,6 +287,11 @@ def main():
     #   上游版本 / 打包版本 / 最低 DSM 版本，空行，然后 MD5 表格。
     # 上游 tag 形如 release-5.3.0_v2.1.2，同时含 qBittorrent 与 libtorrent
     # 两个版本，因此一并标出，避免只看 5.3.0 无法判断 libtorrent 版本。
+    #
+    # ★ 不再写入隐藏标记：
+    #   套件源流水线取正文前 300 字符作为套件中心 changelog，隐藏注释会被
+    #   截断成残片显示出来。上游版本改为由这行可见文本反向解析
+    #   （见 scan_published），所以正文不需要任何额外标记。
     lines = [
         "上游版本：{0}（libtorrent {1}）".format(qbt_version, lt_version),
         "打包版本：" + version,
@@ -291,10 +303,6 @@ def main():
     for item in assets_out:
         lines.append("| `{0}` | {1} | `{2}` |".format(
             item["file"], "ARM" if item["family"] == "arm" else "x86_64", item["md5"]))
-    # ★ 标记放在正文末尾：套件源流水线取正文前 300 字符作为套件中心的
-    #   changelog，标记若在开头会变成可见文本。放在末尾既不影响 changelog，
-    #   渲染时 HTML 注释也不可见。
-    lines += ["", UPSTREAM_MARKER.format(tag=tag)]
     (DIST / "notes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print("构建完成，产物:")
