@@ -276,14 +276,14 @@ def main():
     (DIST / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 正文格式与同流水线的其他套件仓库保持一致：
+    #   上游版本 / 打包版本 / 最低 DSM 版本，空行，然后 MD5 表格。
+    # 上游 tag 形如 release-5.3.0_v2.1.2，同时含 qBittorrent 与 libtorrent
+    # 两个版本，因此一并标出，避免只看 5.3.0 无法判断 libtorrent 版本。
     lines = [
-        "上游版本：" + tag,
-        "qBittorrent：" + qbt_version,
-        "libtorrent：" + lt_version,
+        "上游版本：{0}（libtorrent {1}）".format(qbt_version, lt_version),
         "打包版本：" + version,
         "最低 DSM 版本：" + cfg["os_min_ver"],
-        "",
-        "官方标准版（qBittorrent-nox），不含 Enhanced 增强补丁。",
         "",
         "| 文件 | 架构 | MD5 |",
         "| --- | --- | --- |",
@@ -291,8 +291,9 @@ def main():
     for item in assets_out:
         lines.append("| `{0}` | {1} | `{2}` |".format(
             item["file"], "ARM" if item["family"] == "arm" else "x86_64", item["md5"]))
-    # ★ 标记放在正文末尾：套件源流水线会取 Release 正文的前 300 字符作为
-    #   套件中心的 changelog，标记若放开头会作为可见文本出现在套件中心。
+    # ★ 标记放在正文末尾：套件源流水线取正文前 300 字符作为套件中心的
+    #   changelog，标记若在开头会变成可见文本。放在末尾既不影响 changelog，
+    #   渲染时 HTML 注释也不可见。
     lines += ["", UPSTREAM_MARKER.format(tag=tag)]
     (DIST / "notes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
